@@ -37,3 +37,4 @@ se_set_generic_output_dirs(${CMAKE_SOURCE_DIR} ${BUILD_SUFFIX})
 # -----------------------------------------------------------------------
 add_subdirectory(doc_tracker)
 add_subdirectory(otsu_cq)
+add_subdirectory(sample)
