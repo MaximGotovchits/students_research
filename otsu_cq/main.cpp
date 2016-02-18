@@ -1,5 +1,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -8,7 +9,22 @@
 using namespace cv;
 using namespace std;
 
-void binarize(Mat& image, const int board) {
+bool image_equals(const Mat& image1, const Mat& image2) {
+    if (image1.cols == image2.cols && image1.rows == image2.rows) {
+        for (int i = 0; i < image1.rows; ++i) {
+            for (int j = 0; j < image1.cols; ++j) {
+                if (image1.at<uchar>(i,j) != image1.at<uchar>(i,j)) {
+                    return 0;
+                }
+            }
+        }
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+Mat binarize(Mat& image, const int board) {
     for (int i = 0; i < image.rows; ++i) {
         for (int j = 0; j < image.cols; ++j) {
             if (image.at<uchar>(i, j) <= board) {
@@ -19,9 +35,10 @@ void binarize(Mat& image, const int board) {
         }
     }
     imwrite("new_image.jpg", image);
+    return imread("new_image.jpg");
 }
 
-void otsu(Mat& image) {
+Mat otsu(Mat& image) {
     std::ofstream outfile("new_image.jpg");
     short board = 0;
     double first_class_mean = 0;
@@ -64,7 +81,7 @@ void otsu(Mat& image) {
         first_class_prob = (double) first_class_prob / hist_sum;
         second_class_prob = 1 - first_class_prob;
         for (int j = 0; j <= i; ++j) {
-            first_class_mean = first_class_mean + j*histogram[j];
+            first_class_mean = first_class_mean + j * histogram[j];
         }
         first_class_mean = (double) first_class_mean / first_class_prob;
         second_class_mean = 1 - first_class_mean;
@@ -74,8 +91,9 @@ void otsu(Mat& image) {
             board = i;
         }
     }
-    binarize(image, board);
+    Mat result_image = binarize(image, board);
     outfile.close();
+    return result_image;
 }
 
 int main(int argc, char** argv)
@@ -87,6 +105,13 @@ int main(int argc, char** argv)
         cerr << "Error: Image must be called \"image.jpg\"" << endl;
         return 1;
     }
-    otsu(image);
+    std::ofstream outfile("opencv_otsu_result.jpg");
+    Mat opencv_otsu_result = imread("opencv_otsu_result.jpg");
+    threshold(image, opencv_otsu_result, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+    imwrite("opencv_otsu_result.jpg", opencv_otsu_result);
+    outfile.close();
+    if (!image_equals(otsu(image), opencv_otsu_result)) {
+        cerr << ":-(" << endl;
+    }
     return 0;
 }
