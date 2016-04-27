@@ -12,38 +12,30 @@
 using namespace cv;
 using namespace std;
 
-//class pixels_class_colored {
-//public:
-//    int first_board_r;
-//    int second_board_r;
-//    int first_board_g;
-//    int second_board_g;
-//    int first_board_b;
-//    int second_board_b;
-//
-//    double dispersion;
-//    
-//    pixels_class_colored() {}
-//    
-//    pixels_class_colored(int _first_board_r, int _second_board_r,
-//                         int _first_board_g, int _second_board_g,
-//                         int _first_board_b, int _second_board_b,
-//                         double _dispersion = 0) {
-//        first_board_r = _first_board_r;
-//        second_board_r = _second_board_r;
-//        first_board_g = _first_board_g;
-//        second_board_g = _second_board_g;
-//        first_board_b = _first_board_b;
-//        second_board_b = _second_board_b;
-//
-//        dispersion = _dispersion;
-//    }
-//    
-//    bool operator < (const pixels_class_colored& pc) const {
-//        return dispersion < pc.dispersion;
-//    }
-//
-//};
+class channel_board {
+public:
+    channel_board() {
+        first_board = 0;
+        second_board = 256;
+    }
+    
+    int first_board;
+    int second_board;
+};
+
+class volume_class {
+public:
+    volume_class() {
+        for (int i = 0; i < 3; ++i) {
+            channel_board default_channel;
+            channel.push_back(default_channel);
+            color.push_back(0);
+        }
+    }
+    
+    vector<channel_board> channel;
+    vector<int> color;
+};
 
 class pixels_class {
 public:
@@ -68,9 +60,14 @@ bool image_equals(const Mat& image1, const Mat& image2) {
     return ((countNonZero(image1 - image2) == 0) && (countNonZero(image2 - image1) == 0));
 }
 
-void binarize(Mat image, Mat& result_image, int board, int front_color, int back_color) {
-    //result_image.setTo(front_color, image <= board & image >= front_color);
-    //result_image.setTo(back_color, image > board & image <= back_color);
+void binarize(Mat image, Mat& result_image, int board, int front_board, int color) {
+    for (int j = 0; j < image.cols; ++j) {
+        for (int i = 0; i < image.rows; ++i) {
+            if ((int)image.at<uchar>(i, j) >= front_board && (int)image.at<uchar>(i, j) <= board) {
+                result_image.at<uchar>(i, j) = color;
+            }
+        }
+    }
 }
 
 double& zero() {
@@ -79,7 +76,6 @@ double& zero() {
 }
 
 int get_board(Mat& image, int first_board, int second_board, double& dispersion = zero()) {
-//    cout << dispersion;
     if (first_board == second_board) {
         return first_board;
     }
@@ -88,41 +84,27 @@ int get_board(Mat& image, int first_board, int second_board, double& dispersion 
     vector<int> histogram(256);
     for (int j = 0; j < image.cols; ++j) {
         for (int i = 0; i < image.rows; ++i) {
-            if ((int)image.at<uchar>(i, j) >= first_board && (int)image.at<uchar>(i, j) <= second_board) {
+            if ((int)image.at<uchar>(i, j) >= first_board && (int)image.at<uchar>(i, j) < second_board) {
                 ++histogram[(int)image.at<uchar>(i, j)];
             }
         }
     }
-    int colors = 0;
-    for (auto it = histogram.begin(); it != histogram.end(); ++it) {
-        if (*it != 0) {
-            ++colors;
-        }
-    }
-    //cout << "COLORS: " << colors << endl;
     unsigned hist_sum = accumulate(histogram.begin(), histogram.end(), 0);
     double first_class_mean = 0;
     double second_class_mean = 0;
-    
     first_class_prob = 0;
     second_class_prob = 0;
-    
     dispersion = 0;
     double max_dispersion = dispersion;
     double first_class_sum = 0;
     double first_class_not_mean = 0;
-    
     double sum = 0.0;
-    
     int j = 0;
-    
     for (auto bin_value = histogram.begin(); bin_value != histogram.end(); ++bin_value) {
         sum += (j * (*bin_value));
         ++j;
     }
-    
     int board = 0;
-    
     for (int j = first_board; j <= second_board; ++j) {
         first_class_sum += histogram[j];
         if (first_class_sum == 0) {
@@ -141,31 +123,110 @@ int get_board(Mat& image, int first_board, int second_board, double& dispersion 
             board = j;
         }
     }
+    dispersion = max_dispersion;
     return board;
 }
 
+int vol_get_board(vector<Mat>& channel, int channel_num, deque<volume_class>::iterator box, double& dispersion = zero()) {
+    if (box -> channel[channel_num].first_board == box -> channel[channel_num].second_board) {
+        return box -> channel[channel_num].first_board;
+    }
+    double first_class_prob;
+    double second_class_prob;
+    vector<int> histogram(256);
+    for (int j = 0; j < channel[channel_num].cols; ++j) {
+        for (int i = 0; i < channel[channel_num].rows; ++i) {
+            if ((int)channel[0].at<uchar>(i, j) >= box -> channel[0].first_board &&
+                (int)channel[0].at<uchar>(i, j) < box -> channel[0].second_board &&
+                (int)channel[1].at<uchar>(i, j) >= box -> channel[1].first_board &&
+                (int)channel[1].at<uchar>(i, j) < box -> channel[1].second_board &&
+                (int)channel[2].at<uchar>(i, j) >= box -> channel[2].first_board &&
+                (int)channel[2].at<uchar>(i, j) < box -> channel[2].second_board) {
+                ++histogram[(int)channel[channel_num].at<uchar>(i, j)];
+            }
+        }
+    }
+    unsigned hist_sum = accumulate(histogram.begin(), histogram.end(), 0);
+    double first_class_mean = 0;
+    double second_class_mean = 0;
+    first_class_prob = 0;
+    second_class_prob = 0;
+    dispersion = 0;
+    double max_dispersion = dispersion;
+    double first_class_sum = 0;
+    double first_class_not_mean = 0;
+    double sum = 0.0;
+    int j = 0;
+    for (auto bin_value = histogram.begin(); bin_value != histogram.end(); ++bin_value) {
+        sum += (j * (*bin_value));
+        ++j;
+    }
+    int board = 0;
+    for (int j = box -> channel[channel_num].first_board; j <= box -> channel[channel_num].second_board; ++j) {
+        first_class_sum += histogram[j];
+        if (first_class_sum == 0) {
+            continue;
+        }
+        double second_class_sum = hist_sum - first_class_sum;
+        if (second_class_sum == 0) {
+            break;
+        }
+        first_class_not_mean += (float) (j * histogram[j]);
+        first_class_mean = first_class_not_mean / first_class_sum;
+        second_class_mean = (sum - first_class_not_mean) / second_class_sum;
+        dispersion = (float) first_class_sum * second_class_sum * (first_class_mean - second_class_mean) * (first_class_mean - second_class_mean);
+        if (dispersion > max_dispersion) {
+            max_dispersion = dispersion;
+            board = j;
+        }
+    }
+    dispersion = max_dispersion;
+    return board;
+}
+
+int get_channel_color(Mat& image, int first_board, int second_board) {
+    double mean = 0.0;
+    int pixel_amount = 0;
+    for (int i = 0; i < image.rows; ++i) {
+        for (int j = 0; j < image.cols; ++j) {
+            if ((int)image.at<uchar>(i, j) >= first_board && (int)image.at<uchar>(i, j) < second_board) {
+                mean += (int)image.at<uchar>(i, j);
+                ++pixel_amount;
+            }
+        }
+    }
+    mean /= pixel_amount;
+    int color = mean;
+    return color;
+}
+
 Mat binary_otsu(Mat& image) {
-    int board = get_board(image, 0, 255);
+    int board = get_board(image, 0, 256);
     Mat result_image = image;
-    binarize(image, result_image, board, 0, 255); // front_color(0) < back_color(255)
+    binarize(image, result_image, board, 0, 0);
+    binarize(image, result_image, 256, board, 255);
     return result_image;
 }
 
 Mat colorize(Mat& image, vector<int>& boards) {
     Mat result_image = image;
-    imwrite("MUST_BE_GREY.png", image);
     sort(boards.begin(), boards.end());
+    int color;
     for (auto board = boards.begin(); board != boards.end(); ++board) {
         if (board == boards.begin()) {
+            color = get_channel_color(image, 0, *board);
             binarize(image, result_image, *board, 0, *(board + 1));
             continue;
         }
         if (board == boards.end() - 1) {
-            binarize(image, result_image, *board, *(board - 1), 255);
+            color = get_channel_color(image, *board, 256);
+            binarize(image, result_image, 256, *board, color);
             continue;
         }
-        binarize(image, result_image, *board, *(board - 1), *(board + 1));
+        color = get_channel_color(image, *(board - 1), *board);
+        binarize(image, result_image, *board, *(board - 1), color);
     }
+    imwrite("MUST_BE_GREY.png", result_image);
     return result_image;
 }
 
@@ -191,10 +252,10 @@ double get_dispersion(Mat& image, int first_board, int second_board) {
 
 void init_pixel_classes(Mat& image, deque<pixels_class>& pixel_classes) {
     pixel_classes[0].first_board = 0;
-    pixel_classes[0].second_board = get_board(image, 0, 255);
+    pixel_classes[0].second_board = get_board(image, 0, 256);
     pixel_classes[0].dispersion = get_dispersion(image, pixel_classes[0].first_board, pixel_classes[0].second_board);
     pixel_classes[1].first_board = pixel_classes[0].second_board;
-    pixel_classes[1].second_board = 255;
+    pixel_classes[1].second_board = 256;
     pixel_classes[1].dispersion = get_dispersion(image, pixel_classes[1].first_board, pixel_classes[1].second_board);
 }
 
@@ -249,43 +310,19 @@ Mat multithreshold_otsu(Mat& image, int color_amount) {
             pixel_classes.erase(max_subclass);
             ++counter;
         }
-        return colorize(image, boards);
+        result_image = colorize(image, boards);
     }
     return result_image;
 }
 
 Mat get_channel(vector<Mat> channel) {
     vector<int> dispersions;
-    dispersions.push_back(get_dispersion(channel[0], 0, 255));
-    dispersions.push_back(get_dispersion(channel[1], 0, 255));
-    dispersions.push_back(get_dispersion(channel[2], 0, 255));
+    dispersions.push_back(get_dispersion(channel[0], 0, 256));
+    dispersions.push_back(get_dispersion(channel[1], 0, 256));
+    dispersions.push_back(get_dispersion(channel[2], 0, 256));
     return channel[distance(dispersions.begin(), max_element(dispersions.begin(), dispersions.end()))];
 }
 
-class channel_board {
-public:
-    channel_board() {
-        first_board = 0;
-        second_board = 256;
-    }
-    
-    int first_board;
-    int second_board;
-};
-
-class volume_class {
-public:
-    volume_class() {
-        for (int i = 0; i < 3; ++i) {
-            channel_board default_channel;
-            channel.push_back(default_channel);
-            color.push_back(0);
-        }
-    }
-    
-    vector<channel_board> channel;
-    vector<int> color;
-};
 
 double vol_get_dispersion(deque<volume_class>::iterator box, vector<Mat>& channel) {
     double dispersion = 0.0;
@@ -302,33 +339,28 @@ void add_box(deque<volume_class>& class_boxes, vector<Mat>& channel) {
     int board = 0;
     int current_board = 0;
     auto box_to_split = class_boxes.begin();
-    
-    
     for (auto box = class_boxes.begin(); box != class_boxes.end(); ++box) {
+        double channel_dispersion = 0;
+        dispersion = 0.0;
         for (int j = 0; j < 3; ++j) {
-            current_board = get_board(channel[j], box -> channel[j].first_board, box -> channel[j].second_board, dispersion);
-            if (dispersion > max_dispersion) {
-                max_dispersion = dispersion;
-                channel_to_split = j;
-                box_to_split = box;
-                board = current_board;
-            }
+            vol_get_board(channel, j, box, channel_dispersion);
+            dispersion += channel_dispersion;
+        }
+        if (dispersion > max_dispersion) {
+            box_to_split = box;
+            max_dispersion = dispersion;
         }
     }
-    vector<volume_class> pretenders;
-    max_dispersion = vol_get_dispersion(box_to_split, channel);
-    for (auto box = class_boxes.begin(); box != class_boxes.end(); ++box) {
-        if((box -> channel[channel_to_split].first_board == box_to_split -> channel[channel_to_split].first_board) &&
-           (box -> channel[channel_to_split].second_board == box_to_split -> channel[channel_to_split].second_board)) {
-            dispersion = vol_get_dispersion(box, channel);
-            if (dispersion > max_dispersion) {
-                max_dispersion = dispersion;
-                box_to_split = box;
-            }
-            
+    dispersion = 0.0;
+    max_dispersion = 0.0;
+    for (int j = 0; j < 3; ++j) {
+        current_board = vol_get_board(channel, j, box_to_split, dispersion);
+        if (dispersion > max_dispersion) {
+            max_dispersion = dispersion;
+            channel_to_split = j;
+            board = current_board;
         }
     }
-    
     volume_class first_box;
     volume_class second_box;
     for (int i = 0; i < 3; ++i) {
@@ -341,7 +373,7 @@ void add_box(deque<volume_class>& class_boxes, vector<Mat>& channel) {
             first_box.channel[i].first_board = box_to_split -> channel[i].first_board;
             first_box.channel[i].second_board = box_to_split -> channel[i].second_board;
             second_box.channel[i].first_board = box_to_split -> channel[i].first_board;
-            second_box.channel[i].first_board = box_to_split -> channel[i].second_board;
+            second_box.channel[i].second_board = box_to_split -> channel[i].second_board;
         }
     }
     class_boxes.erase(box_to_split);
@@ -349,25 +381,26 @@ void add_box(deque<volume_class>& class_boxes, vector<Mat>& channel) {
     class_boxes.push_back(second_box);
 }
 
-int get_channel_color(Mat& image, int first_board, int second_board) {
-    double mean = 0.0;
-    int pixel_amount = 0;
-    for (int i = 0; i < image.rows; ++i) {
-        for (int j = 0; j < image.cols; ++j) {
-            if ((int)image.at<uchar>(i, j) >= first_board && (int)image.at<uchar>(i, j) <= second_board) {
-                mean += (int)image.at<uchar>(i, j);
-                ++pixel_amount;
+void get_box_color(deque<volume_class>::iterator box, vector<Mat>& channel) {
+
+    for (int channel_num = 0; channel_num < 3; ++channel_num) {
+        double mean = 0.0;
+        int pixel_amount = 0;
+        for (int i = 0; i < channel[0].rows; ++i) {
+            for (int j = 0; j < channel[0].cols; ++j) {
+                if ((int)channel[0].at<uchar>(i, j) >= box -> channel[0].first_board &&
+                    (int)channel[0].at<uchar>(i, j) < box -> channel[0].second_board &&
+                    (int)channel[1].at<uchar>(i, j) >= box -> channel[1].first_board &&
+                    (int)channel[1].at<uchar>(i, j) < box -> channel[1].second_board &&
+                    (int)channel[2].at<uchar>(i, j) >= box -> channel[2].first_board &&
+                    (int)channel[2].at<uchar>(i, j) < box -> channel[2].second_board) {
+                    mean += (int)channel[channel_num].at<uchar>(i, j);
+                    ++pixel_amount;
+                }
             }
         }
-    }
-    mean /= pixel_amount;
-    int color = mean;
-    return color;
-}
-
-void get_box_color(deque<volume_class>::iterator box, vector<Mat>& channel) {
-    for (int i = 0; i < 3; ++i) {
-        box -> color[i] = get_channel_color(channel[i], box -> channel[i].first_board, box -> channel[i].second_board);
+        mean /= pixel_amount;
+        box -> color[channel_num] = mean;
     }
 }
 
@@ -377,13 +410,29 @@ void compute_colors(deque<volume_class>& class_boxes, vector<Mat>& channel) {
     }
 }
 
+bool pixel_in_box(deque<volume_class>::iterator box, vector<int> pixel) {
+    for (int i = 0; i < 3; ++i) {
+        if (pixel[i] < box -> channel[i].first_board || pixel[i] >= box -> channel[i].second_board) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void box_colorize(deque<volume_class>::iterator box, vector<Mat>& channel) {
-    for (int i = 0; i < 3; ++i) { // Choose channel.
-        for (int j = 0; j < channel[i].rows; ++j) { // For each pixel in the channel.
-            for (int k = 0; k < channel[i].cols; ++k) { // For each pixel in the channel.
-                if ((int)channel[i].at<uchar>(j, k) >= box -> channel[i].first_board &&
-                    (int)channel[i].at<uchar>(j, k) <= box -> channel[i].second_board) {
-                    channel[i].at<uchar>(j, k) = (uchar)box -> color[i];
+    for (int i = 0; i < channel[0].rows; ++i) {
+        for (int j = 0; j < channel[0].cols; ++j) {
+            bool color = true;
+            for (int k = 0; k < 3; ++k) {
+                if ((int)channel[k].at<uchar>(i, j) < box -> channel[k].first_board ||
+                    (int)channel[k].at<uchar>(i, j) >= box -> channel[k].second_board) {
+                    color = false;
+                    break;
+                }
+            }
+            if (color) {
+                for (int k = 0; k < 3; ++k) {
+                    channel[k].at<uchar>(i, j) = (uchar)box -> color[k];
                 }
             }
         }
@@ -431,41 +480,13 @@ Mat multicolor_multhreshold_otsu(Mat image, int color_amount) {
         Mat result;
         merge(channel, result);
         return result;
-    }
-    // Normal cases:
-    if (color_amount == 2) {
-        return binary_otsu(image);
     } else {
-                /*
-         1. Get channel (by max_dispersion ejection).
-         3. Get area with max regural dispersion ().
-         2. Get board for the chosen channel.
-         3.
-        */
+    // Normal cases:
         vector<Mat> channel(3);
         split(image, channel);
-        int channel_to_split = 0;
-        double max_dispersion = 0.0;
-        double dispersion = 0.0;
-        int board = 0;
-        for (int i = 0; i < 3; ++i) {
-            int current_board = get_board(channel[i], 0, 256);
-            if (dispersion > max_dispersion) {
-                max_dispersion = dispersion;
-                channel_to_split = i;
-                board = current_board;
-            }
-        }
-        // init.
         volume_class first_box;
-        first_box.channel[channel_to_split].first_board = 0;
-        first_box.channel[channel_to_split].second_board = board;
-        volume_class second_box;
-        second_box.channel[channel_to_split].first_board = board;
-        second_box.channel[channel_to_split].second_board = 255;
         deque<volume_class> class_boxes;
         class_boxes.push_back(first_box);
-        // end init.
         for (int i = 1; i < color_amount; ++i) {
             add_box(class_boxes, channel);
         }
@@ -476,47 +497,28 @@ Mat multicolor_multhreshold_otsu(Mat image, int color_amount) {
         return result;
     }
     
-//    vector<Mat> channels(3);
-//    split(image, channels);
-//    for (int k = 0; k < 3; ++k) {
-//        channels[k] = multithreshold_otsu(channels[k], color_amount[k]);
-//    }
-//    Mat result;
-//    merge(channels, result);
-//    return result;
-
     return Mat();
 }
-
-//void init_pixel_classes(Mat& image, deque<pixels_class>& pixel_classes) {
-//    pixel_classes[0].first_board = 0;
-//    pixel_classes[0].second_board = get_board(image, 0, 255);
-//    pixel_classes[0].dispersion = get_dispersion(image, pixel_classes[0].first_board, pixel_classes[0].second_board);
-//    pixel_classes[1].first_board = pixel_classes[0].second_board;
-//    pixel_classes[1].second_board = 255;
-//    pixel_classes[1].dispersion = get_dispersion(image, pixel_classes[1].first_board, pixel_classes[1].second_board);
-//}
 
 int main(int argc, char** argv) {
     string image_name = "image.png";
     Mat color_image = imread(image_name);
     Mat image = imread(image_name, 0);
-//    for (int i = 2; i <= 64; i *= 2) {
-        Mat color_result = multicolor_multhreshold_otsu(color_image, 256);
-        string name = to_string(256) + ".png";
-        imwrite(name, color_result);
-  //  }
+    int colors_number = 8;
+    Mat color_result = multicolor_multhreshold_otsu(color_image, colors_number);
+    string name = to_string(colors_number) + ".png";
+    imwrite(name, color_result);
     if (!image.rows && !image.cols) {
         cerr << "Error: Image must be called \"image.png\"" << endl;
         return 1;
     }
-//    Mat opencv_otsu_result = imread("opencv_otsu_result.png");
-//    threshold(image, opencv_otsu_result, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
-//    imwrite("opencv_otsu_result.png", opencv_otsu_result);
+    Mat opencv_otsu_result;
+    threshold(image, opencv_otsu_result, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+    imwrite("opencv_otsu_result.png", opencv_otsu_result);
     Mat grey_result = multithreshold_otsu(image, 2);
     imwrite("grey_result.png", grey_result);
-//    if (!image_equals(grey_result, opencv_otsu_result)) {
-//        cerr << ":-(" << endl;
-//    }
+    if (!image_equals(grey_result, opencv_otsu_result)) {
+        cerr << ":-(" << endl;
+    }
     return 0;
 }
