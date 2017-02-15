@@ -1,102 +1,78 @@
-#include <math.h>
-#include <iostream>
+#include <cstdio>
 #include <cstdlib>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <cmath>
 
 using namespace std;
 using namespace cv;
 
-#define MAXCOLORS  65536
-
-#define RED       2
-#define GREEN     1
-#define BLUE      0
-
-#define BOX_SIZE  33
+#define MAXCOLOR 256
+#define	RED 2
+#define	GREEN 1
+#define BLUE 0
 
 struct box {
-    int r0;                      /* min value, exclusive */
-    int r1;                      /* max value, inclusive */
-    int g0;
-    int g1;
-    int b0;
-    int b1;
-    int vol;
+    unsigned long r0;			 /* min value, exclusive */
+    unsigned long r1;			 /* max value, inclusive */
+    unsigned long g0;
+    unsigned long g1;
+    unsigned long b0;
+    unsigned long b1;
+    unsigned long vol;
 };
 
-float           m2[BOX_SIZE][BOX_SIZE][BOX_SIZE];
-long int        wt[BOX_SIZE][BOX_SIZE][BOX_SIZE];
-long int        mr[BOX_SIZE][BOX_SIZE][BOX_SIZE];
-long int        mg[BOX_SIZE][BOX_SIZE][BOX_SIZE];
-long int        mb[BOX_SIZE][BOX_SIZE][BOX_SIZE];
+/* Histogram is in elements 1..HISTSIZE along each axis,
+ * element 0 is for base or marginal value
+ * NB: these must start out 0!
+ */
 
-void InitBoxes(void)
-{
-    int j;
-    int m;
-    int n;
-    
-    for (j = 0; j < BOX_SIZE; j++)
-    {
-        for (m = 0; m < BOX_SIZE; m++)
-        {
-            for (n = 0; n < BOX_SIZE; n++)
-            {
-                m2[j][m][n] = 0.0;
-                wt[j][m][n] = 0;
-                mr[j][m][n] = 0;
-                mg[j][m][n] = 0;
-                mb[j][m][n] = 0;
-            }
-        }
-    }
-}
+float m2[33][33][33];
+long int wt[33][33][33], mr[33][33][33], mg[33][33][33], mb[33][33][33];
+unsigned char *Ir, *Ig, *Ib;
+int size; /*image size*/
+int	K;    /*color look-up table size*/
+unsigned short int *Qadd;
 
-void Hist3d(int *Ir, int *Ig, int *Ib, int num_pixels,
-       long int *vwt, long int *vmr, long int *vmg, long int *vmb, float *m2,
-       long int *Qadd)
+void Hist3d(long int* vwt, long int* vmr, long int* vmg, long int* vmb, float* m2)
+/* build 3-D color histogram of counts, r/g/b, c^2 */
 {
-    int ind;
-    int r;
-    int g;
-    int b;
-    int inr;
-    int ing;
-    int inb;
-    int table[256];
+    int ind, r, g, b;
+    int inr, ing, inb, table[256];
     long int i;
     
-    for(i=0; i<256; ++i)
-    {
-        table[i]=i * i;
+    for(i = 0; i < 256; ++i) {
+        table[i]= i * i;
     }
-    
-    for(i=0; i<num_pixels; ++i)
-    {
-        r = Ir[i];
-        g = Ig[i];
-        b = Ib[i];
+    Qadd = (unsigned short int *)malloc(sizeof(short int)*size);
+    if (Qadd==NULL) {
+        printf("Not enough space\n");
+        exit(1);
+    }
+    for(i=0; i<size; ++i) {
+        r = Ir[i]; g = Ig[i]; b = Ib[i];
         inr=(r>>3)+1;
         ing=(g>>3)+1;
         inb=(b>>3)+1;
         Qadd[i]=ind=(inr<<10)+(inr<<6)+inr+(ing<<5)+ing+inb;
-        /* [inr][ing][inb] */
+        /*[inr][ing][inb]*/
         ++vwt[ind];
         vmr[ind] += r;
         vmg[ind] += g;
         vmb[ind] += b;
         m2[ind] += (float)(table[r]+table[g]+table[b]);
     }
-    
 }
 
 /* At conclusion of the histogram step, we can interpret
  *   wt[r][g][b] = sum over voxel of P(c)
  *   mr[r][g][b] = sum over voxel of r*P(c)  ,  similarly for mg, mb
  *   m2[r][g][b] = sum over voxel of c^2*P(c)
- * Actually each of these should be divided by 'NumPixels' to give the usual
+ * Actually each of these should be divided by 'size' to give the usual
  * interpretation of P() as ranging from 0 to 1, but we needn't do that here.
  */
 
@@ -104,46 +80,22 @@ void Hist3d(int *Ir, int *Ig, int *Ib, int num_pixels,
  * the sums of the above quantities over any desired box.
  */
 
-/* compute cumulative moments. */
-void M3d(long int *vwt, long int *vmr, long int *vmg, long int *vmb, float *m2)
+
+void M3d(long int* vwt, long int* vmr, long int* vmg, long int* vmb, float* m2) /* compute cumulative moments. */
 {
-    long int ind1;
-    long int ind2;
-    int i;
-    int r;
-    int g;
-    int b;
-    long int line;
-    long int line_r;
-    long int line_g;
-    long int line_b;
-    long int area[BOX_SIZE];
-    long int area_r[BOX_SIZE];
-    long int area_g[BOX_SIZE];
-    long int area_b[BOX_SIZE];
-    float line2;
-    float area2[BOX_SIZE];
+    unsigned short int ind1, ind2;
+    unsigned char i, r, g, b;
+    long int line, line_r, line_g, line_b,
+    area[33], area_r[33], area_g[33], area_b[33];
+    float    line2, area2[33];
     
-    for(r=1; r<BOX_SIZE; ++r)
-    {
-        for(i=0; i<BOX_SIZE; ++i)
-        {
-            area2[i] = 0.0;
-            area[i] = 0;
-            area_r[i] = 0;
-            area_g[i] = 0;
-            area_b[i] = 0;
+    for(r=1; r<=32; ++r){
+        for(i=0; i<=32; ++i) {
+            area2[i]=area[i]=area_r[i]=area_g[i]=area_b[i]=0;
         }
-        
-        for(g=1; g<=32; ++g)
-        {
-            line2 = 0.0;
-            line = 0;
-            line_r = 0;
-            line_g = 0;
-            line_b = 0;
-            for(b=1; b<=32; ++b)
-            {
+        for(g=1; g<=32; ++g){
+            line2 = line = line_r = line_g = line_b = 0;
+            for(b=1; b<=32; ++b){
                 ind1 = (r<<10) + (r<<6) + r + (g<<5) + g + b; /* [r][g][b] */
                 line += vwt[ind1];
                 line_r += vmr[ind1];
@@ -166,8 +118,9 @@ void M3d(long int *vwt, long int *vmr, long int *vmg, long int *vmb, float *m2)
     }
 }
 
+
+long int Vol(struct box* cube, long int mmt[33][33][33])
 /* Compute sum over a box of any given statistic */
-long int Vol(struct box *cube, long int mmt[BOX_SIZE][BOX_SIZE][BOX_SIZE])
 {
     return( mmt[cube->r1][cube->g1][cube->b1]
            -mmt[cube->r1][cube->g1][cube->b0]
@@ -185,13 +138,11 @@ long int Vol(struct box *cube, long int mmt[BOX_SIZE][BOX_SIZE][BOX_SIZE])
  * and with the specified new upper bound.
  */
 
+long int Bottom(struct box* cube, unsigned char dir, long int mmt[33][33][33])
 /* Compute part of Vol(cube, mmt) that doesn't depend on r1, g1, or b1 */
 /* (depending on dir) */
-long int Bottom(struct box *cube, int dir,
-                long int mmt[BOX_SIZE][BOX_SIZE][BOX_SIZE])
 {
-    switch(dir)
-    {
+    switch(dir){
         case RED:
             return( -mmt[cube->r0][cube->g1][cube->b1]
                    +mmt[cube->r0][cube->g1][cube->b0]
@@ -210,19 +161,17 @@ long int Bottom(struct box *cube, int dir,
                    +mmt[cube->r0][cube->g1][cube->b0]
                    -mmt[cube->r0][cube->g0][cube->b0] );
             break;
-        default:
-            cerr << "Internal error: unrecognized value for dir." << endl;
     }
+    printf("Buttom(...) error.");
     return -1;
 }
 
+
+long int Top(struct box* cube, unsigned char dir, int pos, long int mmt[33][33][33])
 /* Compute remainder of Vol(cube, mmt), substituting pos for */
 /* r1, g1, or b1 (depending on dir) */
-long int Top(struct box *cube, int dir, int pos,
-             long int mmt[BOX_SIZE][BOX_SIZE][BOX_SIZE])
 {
-    switch(dir)
-    {
+    switch(dir){
         case RED:
             return( mmt[pos][cube->g1][cube->b1]
                    -mmt[pos][cube->g1][cube->b0]
@@ -241,26 +190,22 @@ long int Top(struct box *cube, int dir, int pos,
                    -mmt[cube->r0][cube->g1][pos]
                    +mmt[cube->r0][cube->g0][pos] );
             break;
-        default:
-            cerr << "Internal error: unrecognized value for dir." << endl;
     }
+    printf("Top(...) error.");
     return -1;
 }
 
+
+float Var(struct box* cube)
 /* Compute the weighted variance of a box */
-/* NB: as with the raw statistics, this is really the variance * NumPixels */
-float Var(struct box *cube)
+/* NB: as with the raw statistics, this is really the variance * size */
 {
-    float dr;
-    float dg;
-    float db;
-    float xx;
-    float result;
+    float dr, dg, db, xx;
     
-    dr = (float) Vol(cube, mr);
-    dg = (float) Vol(cube, mg);
-    db = (float) Vol(cube, mb);
-    xx = m2[cube->r1][cube->g1][cube->b1]
+    dr = Vol(cube, mr);
+    dg = Vol(cube, mg);
+    db = Vol(cube, mb);
+    xx =  m2[cube->r1][cube->g1][cube->b1]
     -m2[cube->r1][cube->g1][cube->b0]
     -m2[cube->r1][cube->g0][cube->b1]
     +m2[cube->r1][cube->g0][cube->b0]
@@ -268,9 +213,11 @@ float Var(struct box *cube)
     +m2[cube->r0][cube->g1][cube->b0]
     +m2[cube->r0][cube->g0][cube->b1]
     -m2[cube->r0][cube->g0][cube->b0];
-    
-    result = xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt);
-    return (float) fabs((float) result);
+    double variance = xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt);
+    cout << xx << " - " << (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt) << endl;
+    cout << "What f returns: " << variance << endl;
+    cout << "Real variance: " << sqrt(variance / size) << endl;
+    return xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt);
 }
 
 /* We want to minimize the sum of the variances of two subboxes.
@@ -281,21 +228,13 @@ float Var(struct box *cube)
  */
 
 
-float Maximize(struct box *cube, int dir, int first, int last, int *cut,
-               long int whole_r, long int whole_g, long int whole_b,
-               long int whole_w)
+float Maximize(struct box* cube, unsigned char dir, int first, int last, int* cut,
+               long int whole_r, long int whole_g, long int whole_b, long int whole_w)
 {
-    long int half_r;
-    long int half_g;
-    long int half_b;
-    long int half_w;
-    long int base_r;
-    long int base_g;
-    long int base_b;
-    long int base_w;
+    long int half_r, half_g, half_b, half_w;
+    long int base_r, base_g, base_b, base_w;
     int i;
-    float temp;
-    float max;
+    float temp, max;
     
     base_r = Bottom(cube, dir, mr);
     base_g = Bottom(cube, dir, mg);
@@ -303,64 +242,41 @@ float Maximize(struct box *cube, int dir, int first, int last, int *cut,
     base_w = Bottom(cube, dir, wt);
     max = 0.0;
     *cut = -1;
-    for(i=first; i<last; ++i)
-    {
+    for(i=first; i<last; ++i){
         half_r = base_r + Top(cube, dir, i, mr);
         half_g = base_g + Top(cube, dir, i, mg);
         half_b = base_b + Top(cube, dir, i, mb);
         half_w = base_w + Top(cube, dir, i, wt);
         /* now half_x is sum over lower half of box, if split at i */
-        if (half_w == 0)
-        {
-            /* subbox could be empty of pixels! */
-            /* never split into an empty box */
-            continue;
-        }
-        else
-        {
+        if (half_w == 0) {      /* subbox could be empty of pixels! */
+            continue;             /* never split into an empty box */
+        } else
             temp = ((float)half_r*half_r + (float)half_g*half_g +
                     (float)half_b*half_b)/half_w;
-        }
-        
-        half_r = whole_r - half_r;
-        half_g = whole_g - half_g;
-        half_b = whole_b - half_b;
-        half_w = whole_w - half_w;
-        if (half_w == 0)
-        {
-            /* subbox could be empty of pixels! */
-            /* never split into an empty box */
-            continue;
-        }
-        else
-        {
-            temp += ((float)half_r*half_r + (float)half_g*half_g +
-                     (float)half_b*half_b)/half_w;
-        }
-        
-        if (temp > max)
-        {
-            max=temp;
-            *cut=i;
-        }
+            
+            half_r = whole_r - half_r;
+            half_g = whole_g - half_g;
+            half_b = whole_b - half_b;
+            half_w = whole_w - half_w;
+            if (half_w == 0) {      /* subbox could be empty of pixels! */
+                continue;             /* never split into an empty box */
+            } else
+                temp += ((float)half_r*half_r + (float)half_g*half_g +
+                         (float)half_b*half_b)/half_w;
+                
+                if (temp > max) {
+                    max=temp; *cut=i;
+                }
     }
-    
     return(max);
 }
 
-int Cut(struct box *set1, struct box *set2)
+int Cut(struct box* set1, struct box* set2)
 {
-    int dir;
-    int cutr;
-    int cutg;
-    int cutb;
-    float maxr;
-    float maxg;
-    float maxb;
-    long int whole_r;
-    long int whole_g;
-    long int whole_b;
-    long int whole_w;
+    unsigned char dir;
+    int cutr, cutg, cutb;
+    float maxr, maxg, maxb;
+    long int whole_r, whole_g, whole_b, whole_w;
     
     whole_r = Vol(set1, mr);
     whole_g = Vol(set1, mg);
@@ -374,31 +290,29 @@ int Cut(struct box *set1, struct box *set2)
     maxb = Maximize(set1, BLUE, set1->b0+1, set1->b1, &cutb,
                     whole_r, whole_g, whole_b, whole_w);
     
-    if( (maxr>=maxg)&&(maxr>=maxb) )
-    {
+    if( (maxr>=maxg)&&(maxr>=maxb) ) {
         dir = RED;
-        if (cutr < 0)
-        {
+        if (cutr < 0) {
             return 0; /* can't split the box */
         }
     }
-    else
-    {
+    else {
         if( (maxg>=maxr)&&(maxg>=maxb) ) {
             dir = GREEN;
         }
-        else
-        {
+        else {
             dir = BLUE;
         }
     }
-    
-    set2->r1 = set1->r1;
-    set2->g1 = set1->g1;
-    set2->b1 = set1->b1;
-    
-    switch (dir)
-    {
+    if (set1->r1 && set1->g1 && set1->b1) {
+        set2->r1 = set1->r1;
+        set2->g1 = set1->g1;
+        set2->b1 = set1->b1;
+    } else {
+//        cerr << "Too many colors are chosen." << endl;
+        return 0;
+    }
+    switch (dir) {
         case RED:
             set2->r0 = set1->r1 = cutr;
             set2->g0 = set1->g0;
@@ -414,29 +328,19 @@ int Cut(struct box *set1, struct box *set2)
             set2->r0 = set1->r0;
             set2->g0 = set1->g0;
             break;
-        default:
-            cerr << "Internal error: unrecognized value for dir." << endl;
     }
-    
     set1->vol=(set1->r1-set1->r0)*(set1->g1-set1->g0)*(set1->b1-set1->b0);
     set2->vol=(set2->r1-set2->r0)*(set2->g1-set2->g0)*(set2->b1-set2->b0);
-    
     return 1;
 }
 
 
-void Mark(struct box *cube, int label, int *tag)
-{
-    int r;
-    int g;
-    int b;
+void Mark(struct box* cube, int label, unsigned char* tag) {
+    int r, g, b;
     
-    for(r=cube->r0+1; r<=cube->r1; ++r)
-    {
-        for(g=cube->g0+1; g<=cube->g1; ++g)
-        {
-            for(b=cube->b0+1; b<=cube->b1; ++b)
-            {
+    for(r=cube->r0+1; r<=cube->r1; ++r) {
+        for(g=cube->g0+1; g<=cube->g1; ++g) {
+            for(b=cube->b0+1; b<=cube->b1; ++b) {
                 tag[(r<<10) + (r<<6) + r + (g<<5) + g + b] = label;
             }
         }
@@ -444,28 +348,78 @@ void Mark(struct box *cube, int label, int *tag)
 }
 
 
+//vector<vector<vector<int>>> get_all_colors_number(Mat image) {
+//    cout << 256*256*256 << endl;
+//    vector<vector<vector<int>>> hist;
+//    vector<int> colors_g(256, 0);
+//    for (int i = 0; i < 256; ++i) {
+//        vector<vector<int>> colors_r;
+//        for (int j = 0; j < 256; ++j) {
+//            colors_r.push_back(colors_g);
+//        }
+//        hist.push_back(colors_r);
+//    }
+//    int colors_number = 0;
+//    vector<Mat> channel(3);
+//    split(image, channel);
+//    int rows = image.rows;
+//    int cols = image.cols;
+//    for (int i = 0; i < rows; ++i) {
+//        for (int j = 0; j < cols; ++j) {
+//            int r = (int)channel[0].at<uchar>(i, j);
+//            int g = (int)channel[1].at<uchar>(i, j);
+//            int b = (int)channel[2].at<uchar>(i, j);
+//            if (hist[r][g][b] == 0) {
+//                ++colors_number;
+//            }
+//            ++hist[r][g][b];
+//        }
+//    }
+//    cout << "Number of colors: " << colors_number << endl;
+//    return hist;
+//}
 
 
-int quantize_color(int *Ir, int *Ig, int *Ib, int num_pixels,
-                   int *lut_r, int *lut_g, int *lut_b, int num_colors,
-                   long int *Qadd, bool compute_output_image)
-{
-    struct box *cube;
-    int *tag;
-    int next;
-    long int i;
-    long int weight;
-    int k;
-    float *vv;
-    float temp;
+Mat Quantize(string image_name, int colors_number) {
+    Mat input_image = imread(image_name);
+    vector<Mat> channel(3);
+    split(input_image, channel);
     
-    cube = (struct box *) calloc(MAXCOLORS, sizeof(*cube));
-    vv = (float *) calloc(MAXCOLORS, sizeof(*vv));
+//    auto g = get_all_colors_number(input_image);
     
-    InitBoxes();
+    struct box cube[MAXCOLOR];
+    unsigned char *tag;
+    unsigned char lut_r[MAXCOLOR], lut_g[MAXCOLOR], lut_b[MAXCOLOR];
+    int	next;
+    long int i, weight;
+    int	k;
+    float vv[MAXCOLOR], temp;
     
-    Hist3d(Ir, Ig, Ib, num_pixels, (long int *) &wt, (long int *) &mr,
-           (long int *) &mg, (long int *) &mb, (float *) &m2, Qadd);
+    /* input R,G,B components into Ir, Ig, Ib;
+     set size to width*height */
+    
+    
+    size = channel[0].rows * channel[0].cols;
+    Ir = (unsigned char*)malloc(sizeof(unsigned char) * size);
+    Ig = (unsigned char*)malloc(sizeof(unsigned char) * size);
+    Ib = (unsigned char*)malloc(sizeof(unsigned char) * size);
+    
+    for (unsigned i = 0; i < channel[0].rows; ++i) {
+        for (unsigned j = 0; j < channel[0].cols; ++j) {
+            Ir[j + (i * channel[0].cols)] = channel[0].at<uchar>(i, j);
+            Ig[j + (i * channel[0].cols)] = channel[1].at<uchar>(i, j);
+            Ib[j + (i * channel[0].cols)] = channel[2].at<uchar>(i, j);
+        }
+    }
+    K = colors_number;
+    
+    clock_t begin = clock();
+    
+    Hist3d((long int *) &wt, (long int *) &mr, (long int *) &mg, (long int *) &mb, (float *) &m2);
+    
+//    printf("Histogram done\n");
+    
+    free(Ig); free(Ib); free(Ir);
     
     M3d((long int *) &wt, (long int *) &mr, (long int *) &mg,
         (long int *) &mb, (float *) &m2);
@@ -473,126 +427,88 @@ int quantize_color(int *Ir, int *Ig, int *Ib, int num_pixels,
     cube[0].r0 = cube[0].g0 = cube[0].b0 = 0;
     cube[0].r1 = cube[0].g1 = cube[0].b1 = 32;
     next = 0;
-    for(i=1; i<num_colors; ++i)
-    {
-        if (Cut(&cube[next], &cube[i]))
-        {
+    for(i=1; i<K; ++i){
+        if (Cut(&cube[next], &cube[i])) {
             /* volume test ensures we won't try to cut one-cell box */
-            vv[next] = (cube[next].vol>1) ? Var(&cube[next]) : 0.0F;
-            vv[i] = (cube[i].vol>1) ? Var(&cube[i]) : 0.0F;
-        }
-        else
-        {
+            vv[next] = (cube[next].vol>1) ? Var(&cube[next]) : 0.0;
+            vv[i] = (cube[i].vol>1) ? Var(&cube[i]) : 0.0;
+        } else {
             vv[next] = 0.0;   /* don't try to split this box again */
             i--;              /* didn't create box i */
         }
-        next = 0;
-        temp = vv[0];
+        next = 0; temp = vv[0];
         for(k=1; k<=i; ++k)
-        {
             if (vv[k] > temp) {
                 temp = vv[k]; next = k;
             }
-        }
-        if (temp <= 0.0)
-        {
-            num_colors = i+1;
-            /* Only got num_colors boxes */
+        if (temp <= 0.0) {
+            K = i + 1;
+            fprintf(stderr, "Only got %d boxes\n", K);
             break;
         }
     }
+//    printf("Partition done\n");
     
-    tag = (int *) malloc(BOX_SIZE*BOX_SIZE*BOX_SIZE * sizeof(*tag));
+    /* the space for array m2 can be freed now */
     
-    for(k=0; k<num_colors; ++k)
-    {
+    tag = (unsigned char *)malloc(33*33*33);
+    if (tag==NULL) {
+        printf("Not enough space\n");
+        exit(1);
+    }
+    for(k=0; k<K; ++k) {
         Mark(&cube[k], k, tag);
         weight = Vol(&cube[k], wt);
-        if (weight)
-        {
-            lut_r[k] = (int) (Vol(&cube[k], mr) / weight);
-            lut_g[k] = (int) (Vol(&cube[k], mg) / weight);
-            lut_b[k] = (int) (Vol(&cube[k], mb) / weight);
+        if (weight) {
+            lut_r[k] = Vol(&cube[k], mr) / weight;
+            lut_g[k] = Vol(&cube[k], mg) / weight;
+            lut_b[k] = Vol(&cube[k], mb) / weight;
         }
-        else
-        {
-            /* bogus box */
+        else {
+            fprintf(stderr, "bogus box %d\n", k);
             lut_r[k] = lut_g[k] = lut_b[k] = 0;
         }
     }
     
-    if (compute_output_image)
-    {
-        for (i=0; i<num_pixels; ++i)
-        {
-            Qadd[i] = tag[Qadd[i]];
-        }
+    for(i=0; i<size; ++i) {
+        Qadd[i] = tag[Qadd[i]];
     }
+    clock_t end = clock();
+    double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+    cout << elapsed_secs << endl;
+    /* output lut_r, lut_g, lut_b as color look-up table contents,
+     Qadd as the quantized image (array of table addresses). */
     
-    free(tag);
-    free(vv);
-    free(cube);
     
-    return(num_colors);
-}
-
-
-Mat quantize(string image_name, int colors_number) {
-    int num_pixels;
-    int *image_bytes_red;
-    int *image_bytes_green;
-    int *image_bytes_blue;
-    int *lut_red;
-    int *lut_green;
-    int *lut_blue;
-    long int **out_image;
-    long int *out_pr;
-    int num_colors = colors_number;
-    Mat input_image = imread(image_name);
-    vector<Mat> channel(3);
-    split(input_image, channel);
-    num_pixels = input_image.rows * input_image.cols;
-    image_bytes_red = (int*)malloc(sizeof(int) * num_pixels);
-    image_bytes_green = (int*)malloc(sizeof(int) * num_pixels);
-    image_bytes_blue = (int*)malloc(sizeof(int) * num_pixels);
-    for (int j = 0; j < input_image.cols; ++j) {
-        for (int i = 0; i < input_image.rows; ++i) {
-            image_bytes_red[j + (i * input_image.cols)] = (int)channel[0].at<uchar>(i, j);
-            image_bytes_green[j + (i * input_image.cols)] = (int)channel[1].at<uchar>(i, j);
-            image_bytes_blue[j + (i * input_image.cols)] = (int)channel[2].at<uchar>(i, j);
-        }
-    }
-    lut_red = (int *) malloc(num_colors * sizeof(*lut_red));
-    lut_green = (int *) malloc(num_colors * sizeof(*lut_green));
-    lut_blue = (int *) malloc(num_colors * sizeof(*lut_blue));
-    out_image = (long int **)malloc(sizeof(long int *) * input_image.rows);
-    for (int i = 0; i < input_image.rows; ++i) {
-        out_image[i] = (long int*)malloc(sizeof(long int) * input_image.cols);
-    }
-    out_pr = (long int*)out_image[0];
-    num_colors = quantize_color(image_bytes_red, image_bytes_green,
-                                image_bytes_blue, num_pixels,
-                                lut_red, lut_green, lut_blue, num_colors,
-                                out_pr, true);
     Mat output_image;
-    for (int i = 0; i < num_pixels; ++i) {
-        int row = i / (num_pixels / input_image.rows);
-        int col = i % (num_pixels / input_image.rows);   
-        channel[0].at<uchar>(row, col) = lut_red[out_image[row][col]];
-        channel[1].at<uchar>(row, col) = lut_green[out_image[row][col]];
-        channel[2].at<uchar>(row, col) = lut_blue[out_image[row][col]];
+    vector<Mat> output_channel;
+    Mat out_r(channel[0].rows, channel[0].cols, CV_8UC1, Scalar(0));
+    Mat out_g(channel[0].rows, channel[0].cols, CV_8UC1, Scalar(0));
+    Mat out_b(channel[0].rows, channel[0].cols, CV_8UC1, Scalar(0));
+    output_channel.push_back(out_r);
+    output_channel.push_back(out_g);
+    output_channel.push_back(out_b);
+    unsigned row;
+    unsigned col;
+    for (unsigned i = 0; i < size; ++i) {
+        row = i / channel[0].cols;
+        col = i % channel[0].cols;
+        output_channel[0].at<uchar>(row, col) = lut_r[Qadd[i]];
+        output_channel[1].at<uchar>(row, col) = lut_g[Qadd[i]];
+        output_channel[2].at<uchar>(row, col) = lut_b[Qadd[i]];
     }
-    merge(channel, output_image);
-    imwrite("/Users/IIMaximII/Desktop/out1.png", output_image);
-    free(lut_red);
-    free(lut_green);
-    free(lut_blue);
+//    cout << row << " " << col << endl;
+    merge(output_channel, output_image);
     return output_image;
 }
 
 
 int main() {
-    string image_name = "/Users/IIMaximII/Desktop/imageQQ.png";
-    quantize(image_name, 8);
-    return 0;
+//    for (int i = 1; i <= 5; ++i) {
+//        Mat output_image = Quantize("/Users/IIMaximII/Desktop/mlmarerials/doc" + to_string(i) + ".jpg", 20);
+//        imwrite("/Users/IIMaximII/Desktop/mlmarerials/out" + to_string(i) + ".jpg", output_image);
+//    }
+    Mat output_image = Quantize("/Users/IIMaximII/Desktop/mlmarerials/doc4.jpg", 4);
+    imwrite("/Users/IIMaximII/Desktop/mlmarerials/out4.png", output_image);
+    
 }
