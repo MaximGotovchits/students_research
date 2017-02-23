@@ -7,6 +7,8 @@
 #include <vector>
 #include <ctime>
 #include <cmath>
+//#include <map>
+#include <numeric>
 
 using namespace std;
 using namespace cv;
@@ -214,10 +216,11 @@ float Var(struct box* cube)
     +m2[cube->r0][cube->g0][cube->b1]
     -m2[cube->r0][cube->g0][cube->b0];
     double variance = xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt);
-    cout << xx << " - " << (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt) << endl;
-    cout << "What f returns: " << variance << endl;
+//    cout << xx << " - " << (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt) << endl;
+//    cout << "What f returns: " << variance << endl;
     cout << "Real variance: " << sqrt(variance / size) << endl;
-    return xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt);
+//    return xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt);
+    return sqrt(variance / size);
 }
 
 /* We want to minimize the sum of the variances of two subboxes.
@@ -380,11 +383,294 @@ void Mark(struct box* cube, int label, unsigned char* tag) {
 //}
 
 
+int ApproxPixel(vector<vector<int>>& sharpen_matrix, Mat& channel, int row, int col) {
+    int sum = 0;
+    int ksum = 0;
+//    cout << sharpen_matrix[0][0] << " " << sharpen_matrix[0][1] << " " << sharpen_matrix[0][2] << endl;
+//    cout << sharpen_matrix[1][0] << " " << sharpen_matrix[1][1] << " " << sharpen_matrix[1][2] << endl;
+//    cout << sharpen_matrix[2][0] << " " << sharpen_matrix[2][1] << " " << sharpen_matrix[2][2] << endl;
+    for (int i = -1; i <= 1; ++i) {
+        for (int j = -1; j <= 1; ++j) {
+            sum += (int)(sharpen_matrix[i + 1][j + 1] * (int)channel.at<uchar>(row + i, col + j));
+            ksum += (int)sharpen_matrix[i + 1][j + 1];
+        }
+    }
+//    cout << sum << " " << ksum << endl;
+//    cout << (int)channel.at<uchar>(row, col) << " " << (int) (sum / ksum) << endl;
+    int result_pixel = (int) (sum / ksum);
+    if (result_pixel > 255) {
+        result_pixel = 255;
+    }
+    if (result_pixel < 0) {
+        result_pixel = 0;
+    }
+    return result_pixel;
+}
+
+
+int get_dst(vector<int>& a, vector<int>& b) {
+    return (a[0] - b[0])*(a[0] - b[0]) + (a[1] - b[1])*(a[1] - b[1]) + (a[2] - b[2])*(a[2] - b[2]);
+}
+
+
+vector<Mat> SharpenImage(vector<Mat>& channel, vector<vector<int>> colors) {
+    vector<Mat> result_channel = channel;
+    vector<vector<int>> sharpen_matrix;
+    vector<int> sharpen_row = {0, 1, 0};
+    sharpen_matrix.push_back(sharpen_row);
+    sharpen_row = {1, 4, 1};
+    sharpen_matrix.push_back(sharpen_row);
+    sharpen_row = {0, 1, 0};
+    sharpen_matrix.push_back(sharpen_row);
+//    cout << sharpen_matrix[0][0] << " " << sharpen_matrix[0][1] << " " << sharpen_matrix[0][2] << endl;
+//    cout << sharpen_matrix[1][0] << " " << sharpen_matrix[1][1] << " " << sharpen_matrix[1][2] << endl;
+//    cout << sharpen_matrix[2][0] << " " << sharpen_matrix[2][1] << " " << sharpen_matrix[2][2] << endl;
+    for (int n = 0; n < 3; ++n) {
+        for (int r = 1; r < channel[0].rows - 1; ++r) {
+            for (int c = 1; c < channel[0].cols - 1; ++c) {
+                result_channel[n].at<uchar>(r, c) = (int)ApproxPixel(sharpen_matrix, channel[n], r, c);
+//                cout << (int)result_channel[n].at<uchar>(r, c) << endl;
+                //                int sum = 0;
+                //                int ksum = 0;
+                //                for (int j = 0; j < 3; ++j) {
+                //                    for (int i = 0; i < 3; ++i) {
+                //                        sum += (sharpen_matrix[i][j] * (int)channel[n].at<uchar>(r, c));
+                //                        ksum += sharpen_matrix[i][j];
+                //                    }
+                //                }
+                //                result_channel[n].at<uchar>(r, c) = (int) (sum / ksum);
+            }
+        }
+    }
+    for (int r = 1; r < channel[0].rows - 1; ++r) {
+        for (int c = 1; c < channel[0].cols - 1; ++c) {
+            int min_dst = 2000000;
+            vector<int> res_color(3, 0);
+            vector<int> a = {(int)result_channel[0].at<uchar>(r, c), (int)result_channel[1].at<uchar>(r, c), (int)result_channel[2].at<uchar>(r, c)};
+            for (int i = 0; i < colors.size(); ++i) {
+                vector<int> b = {colors[i][0], colors[i][1], colors[i][2]};
+                int current_dst = get_dst(a, b);
+                if (current_dst < min_dst) {
+                    min_dst = current_dst;
+                    res_color = colors[i];
+                }
+            }
+            result_channel[0].at<uchar>(r, c) = res_color[0];
+            result_channel[1].at<uchar>(r, c) = res_color[1];
+            result_channel[2].at<uchar>(r, c) = res_color[2];
+        }
+    }
+    return result_channel;
+}
+
+
+vector<Mat> SharpenImageSecond(vector<Mat>& channel) {
+    vector<Mat> result_channel = channel;
+    vector<vector<int>> sharpen_matrix;
+    vector<int> sharpen_row = {0, -1, 0};
+    sharpen_matrix.push_back(sharpen_row);
+    sharpen_row = {-1, 4, -1};
+    sharpen_matrix.push_back(sharpen_row);
+    sharpen_row = {0, -1, 0};
+    sharpen_matrix.push_back(sharpen_row);
+    //    cout << sharpen_matrix[0][0] << " " << sharpen_matrix[0][1] << " " << sharpen_matrix[0][2] << endl;
+    //    cout << sharpen_matrix[1][0] << " " << sharpen_matrix[1][1] << " " << sharpen_matrix[1][2] << endl;
+    //    cout << sharpen_matrix[2][0] << " " << sharpen_matrix[2][1] << " " << sharpen_matrix[2][2] << endl;
+    for (int n = 0; n < 3; ++n) {
+        for (int r = 1; r < channel[0].rows - 1; ++r) {
+            for (int c = 1; c < channel[0].cols - 1; ++c) {
+                result_channel[n].at<uchar>(r, c) = (int)ApproxPixel(sharpen_matrix, channel[n], r, c);
+                //                cout << (int)result_channel[n].at<uchar>(r, c) << endl;
+                //                int sum = 0;
+                //                int ksum = 0;
+                //                for (int j = 0; j < 3; ++j) {
+                //                    for (int i = 0; i < 3; ++i) {
+                //                        sum += (sharpen_matrix[i][j] * (int)channel[n].at<uchar>(r, c));
+                //                        ksum += sharpen_matrix[i][j];
+                //                    }
+                //                }
+                //                result_channel[n].at<uchar>(r, c) = (int) (sum / ksum);
+            }
+        }
+    }
+    return result_channel;
+}
+
+
+//int FilterWindow(vector<vector<int>>& window_matrix, Mat& channel, int row, int col) {
+//    int sum = 0;
+//    int ksum = 0;
+//    //    cout << sharpen_matrix[0][0] << " " << sharpen_matrix[0][1] << " " << sharpen_matrix[0][2] << endl;
+//    //    cout << sharpen_matrix[1][0] << " " << sharpen_matrix[1][1] << " " << sharpen_matrix[1][2] << endl;
+//    //    cout << sharpen_matrix[2][0] << " " << sharpen_matrix[2][1] << " " << sharpen_matrix[2][2] << endl;
+////    for (int i = -1; i <= 1; ++i) {
+////        for (int j = -1; j <= 1; ++j) {
+////            sum += (int)(sharpen_matrix[i + 1][j + 1] * (int)channel.at<uchar>(row + i, col + j));
+////            ksum += (int)sharpen_matrix[i + 1][j + 1];
+////        }
+////    }
+//    //    cout << sum << " " << ksum << endl;
+//    //    cout << (int)channel.at<uchar>(row, col) << " " << (int) (sum / ksum) << endl;
+//    map<vector<int>, int> pixel_to_amount;
+//    for (int i = 0; i <= 2; ++i) {
+//        for (int j = 0; j <= 2; ++j) {
+//            vector<int> pixel_value = {}
+//            pixel_to_amount.insert(make_pair(vector<int>{}));
+//        }
+//    }
+//    
+//    int result_pixel = (int) (sum / ksum);
+//    if (result_pixel > 255) {
+//        result_pixel = 255;
+//    }
+//    if (result_pixel < 0) {
+//        result_pixel = 0;
+//    }
+//    return result_pixel;
+//}
+
+
+vector<Mat> Filter(vector<Mat>& channel) {
+    vector<Mat> result_channel = channel;
+    vector<vector<int>> window_matrix;
+    vector<int> window_row(3);
+    window_matrix.push_back(window_row);
+    window_matrix.push_back(window_row);
+    window_matrix.push_back(window_row);
+
+    
+    
+    
+//    for (int n = 0; n < 3; ++n) {
+//        for (int r = 1; r < channel[0].rows - 1; ++r) {
+//            for (int c = 1; c < channel[0].cols - 1; ++c) {
+//                vector<int> hist(256, 0);
+//                window_matrix[0][0] = (int)channel[n].at<uchar>(r - 1, c - 1);
+//                window_matrix[0][1] = (int)channel[n].at<uchar>(r - 1, c);
+//                window_matrix[0][2] = (int)channel[n].at<uchar>(r - 1, c + 1);
+//                window_matrix[1][0] = (int)channel[n].at<uchar>(r, c - 1);
+//                window_matrix[1][1] = (int)channel[n].at<uchar>(r, c);
+//                window_matrix[1][2] = (int)channel[n].at<uchar>(r, c + 1);
+//                window_matrix[2][0] = (int)channel[n].at<uchar>(r + 1, c - 1);
+//                window_matrix[2][1] = (int)channel[n].at<uchar>(r + 1, c);
+//                window_matrix[2][2] = (int)channel[n].at<uchar>(r + 1, c + 1);
+//                for (int i = 0; i < 3; ++i) {
+//                    for (int j = 0; j < 3; ++j) {
+////                        if ((i == 0 && j == 0) || (i == 0 && j == 2) || (i == 2 && j == 0) || (i == 2 && j == 2)){
+////                            continue;
+////                        }
+//                        ++hist[window_matrix[i][j]];
+//                    }
+//                }
+//                auto max_it = max_element(hist.begin(), hist.end() - 1);
+//                int max_ind = distance(hist.begin(), max_it);
+//                int max_value = *max_it;
+//                hist[max_ind] = 0;
+//                vector<int> values_to_mean;
+//                values_to_mean.push_back(max_ind);
+//                while (max_value == *max_element(hist.begin(), hist.end() - 1)) {
+//                    max_it = max_element(hist.begin(), hist.end() - 1);
+//                    max_ind = distance(hist.begin(), max_it);
+//                    hist[max_ind] = 0;
+//                    values_to_mean.push_back(max_ind);
+////                    max_ind = distance(hist.begin(), max_it);
+//                }
+//                
+//                
+//                
+//                result_channel[n].at<uchar>(r, c) = accumulate(values_to_mean.begin(), values_to_mean.end(), 0) / values_to_mean.size();
+//                
+////                result_channel[n].at<uchar>(r, c) = (int)FilterWindow(sharpen_matrix, channel[n], r, c);
+//                //                cout << (int)result_channel[n].at<uchar>(r, c) << endl;
+//                //                int sum = 0;
+//                //                int ksum = 0;
+//                //                for (int j = 0; j < 3; ++j) {
+//                //                    for (int i = 0; i < 3; ++i) {
+//                //                        sum += (sharpen_matrix[i][j] * (int)channel[n].at<uchar>(r, c));
+//                //                        ksum += sharpen_matrix[i][j];
+//                //                    }
+//                //                }
+//                //                result_channel[n].at<uchar>(r, c) = (int) (sum / ksum);
+//            }
+//        }
+//    }
+    
+    
+    for (int n = 0; n < 3; ++n) {
+        for (int r = 1; r < channel[0].rows - 1; ++r) {
+            for (int c = 1; c < channel[0].cols - 1; ++c) {
+                vector<int> hist(256, 0);
+                window_matrix[0][0] = (int)channel[n].at<uchar>(r - 1, c - 1);
+                window_matrix[0][1] = (int)channel[n].at<uchar>(r - 1, c);
+                window_matrix[0][2] = (int)channel[n].at<uchar>(r - 1, c + 1);
+                window_matrix[1][0] = (int)channel[n].at<uchar>(r, c - 1);
+                window_matrix[1][1] = (int)channel[n].at<uchar>(r, c);
+                window_matrix[1][2] = (int)channel[n].at<uchar>(r, c + 1);
+                window_matrix[2][0] = (int)channel[n].at<uchar>(r + 1, c - 1);
+                window_matrix[2][1] = (int)channel[n].at<uchar>(r + 1, c);
+                window_matrix[2][2] = (int)channel[n].at<uchar>(r + 1, c + 1);
+                for (int i = 0; i < 3; ++i) {
+                    for (int j = 0; j < 3; ++j) {
+                        //                        if ((i == 0 && j == 0) || (i == 0 && j == 2) || (i == 2 && j == 0) || (i == 2 && j == 2)){
+                        //                            continue;
+                        //                        }
+                        ++hist[window_matrix[i][j]];
+                    }
+                }
+                auto max_it = max_element(hist.begin(), hist.end() - 1);
+                int max_ind = distance(hist.begin(), max_it);
+                int max_value = *max_it;
+                hist[max_ind] = 0;
+                vector<int> values_to_mean;
+                values_to_mean.push_back(max_ind);
+//                while (max_value == *max_element(hist.begin(), hist.end() - 1)) {
+//                    max_it = max_element(hist.begin(), hist.end() - 1);
+//                    max_ind = distance(hist.begin(), max_it);
+//                    hist[max_ind] = 0;
+//                    values_to_mean.push_back(max_ind);
+//                    //                    max_ind = distance(hist.begin(), max_it);
+//                }
+//                
+//                
+//                
+                result_channel[n].at<uchar>(r, c) = accumulate(values_to_mean.begin(), values_to_mean.end(), 0) / values_to_mean.size();
+                
+                //                result_channel[n].at<uchar>(r, c) = (int)FilterWindow(sharpen_matrix, channel[n], r, c);
+                //                cout << (int)result_channel[n].at<uchar>(r, c) << endl;
+                //                int sum = 0;
+                //                int ksum = 0;
+                //                for (int j = 0; j < 3; ++j) {
+                //                    for (int i = 0; i < 3; ++i) {
+                //                        sum += (sharpen_matrix[i][j] * (int)channel[n].at<uchar>(r, c));
+                //                        ksum += sharpen_matrix[i][j];
+                //                    }
+                //                }
+                //                result_channel[n].at<uchar>(r, c) = (int) (sum / ksum);
+            }
+        }
+    }
+
+    
+    return result_channel;
+}
+
+
+//vector<Mat> Mask(vector<Mat>& channel, vector<vector<int>>& colors) {
+//    // Creating a mask.
+//    vector<vector<vector<int>>> masks(colors.size());
+//    for (int i = 0; i < colors.size(); ++i) {
+////        cout << colors[i][0] << " " << colors[i][1] << " " << colors[i][2] << endl;
+//        
+//    }
+//    return channel;
+//}
+
+
 Mat Quantize(string image_name, int colors_number) {
     Mat input_image = imread(image_name);
     vector<Mat> channel(3);
     split(input_image, channel);
-    
+//    channel = SharpenImage(channel);
 //    auto g = get_all_colors_number(input_image);
     
     struct box cube[MAXCOLOR];
@@ -432,6 +718,7 @@ Mat Quantize(string image_name, int colors_number) {
             /* volume test ensures we won't try to cut one-cell box */
             vv[next] = (cube[next].vol>1) ? Var(&cube[next]) : 0.0;
             vv[i] = (cube[i].vol>1) ? Var(&cube[i]) : 0.0;
+            
         } else {
             vv[next] = 0.0;   /* don't try to split this box again */
             i--;              /* didn't create box i */
@@ -441,7 +728,7 @@ Mat Quantize(string image_name, int colors_number) {
             if (vv[k] > temp) {
                 temp = vv[k]; next = k;
             }
-        if (temp <= 0.0) {
+        if (temp <= 0.0 || temp <= 35.0f) {
             K = i + 1;
             fprintf(stderr, "Only got %d boxes\n", K);
             break;
@@ -490,25 +777,50 @@ Mat Quantize(string image_name, int colors_number) {
     output_channel.push_back(out_b);
     unsigned row;
     unsigned col;
+    vector<int> tmp;
     for (unsigned i = 0; i < size; ++i) {
         row = i / channel[0].cols;
         col = i % channel[0].cols;
         output_channel[0].at<uchar>(row, col) = lut_r[Qadd[i]];
         output_channel[1].at<uchar>(row, col) = lut_g[Qadd[i]];
         output_channel[2].at<uchar>(row, col) = lut_b[Qadd[i]];
+        tmp.push_back(Qadd[i]);
     }
+    sort(tmp.begin(), tmp.end());
+    tmp.erase(unique(tmp.begin(), tmp.end()), tmp.end());
+    vector<vector<int>> colors;
+    for (int i = 0; i < tmp.size(); ++i) { // tmp.size() == number of colors.
+        vector<int> current_color = {lut_r[i], lut_g[i], lut_b[i]};
+        colors.push_back(current_color);
+//        colors[i] = current_color;
+    }
+//    output_channel = Mask(output_channel, colors);
+//    cout << tmp.size() << " " << size << endl;
+//    output_channel = Filter(output_channel);
 //    cout << row << " " << col << endl;
+    output_channel = SharpenImage(output_channel, colors);
+//    output_channel = Filter(output_channel);
     merge(output_channel, output_image);
     return output_image;
 }
 
 
 int main() {
-//    for (int i = 1; i <= 5; ++i) {
-//        Mat output_image = Quantize("/Users/IIMaximII/Desktop/mlmarerials/doc" + to_string(i) + ".jpg", 20);
-//        imwrite("/Users/IIMaximII/Desktop/mlmarerials/out" + to_string(i) + ".jpg", output_image);
+//    Mat output_image;
+//    for (int i = 5; i <= 7; ++i) {
+//        Mat output_image;
+//        output_image = Quantize("/Users/IIMaximII/Desktop/mlmarerials/doc" + to_string(i) + ".jpg", 20);
+//        imwrite("/Users/IIMaximII/Desktop/mlmarerials/out" + to_string(i) + ".png", output_image);
 //    }
-    Mat output_image = Quantize("/Users/IIMaximII/Desktop/mlmarerials/doc4.jpg", 4);
-    imwrite("/Users/IIMaximII/Desktop/mlmarerials/out4.png", output_image);
-    
+//    Mat input_image = imread("/Users/IIMaximII/Desktop/mlmarerials/doc17.jpg");
+    Mat output_image = Quantize("/Users/IIMaximII/Desktop/mlmarerials/doc19.jpg", 256);
+
+//    Mat input_image = imread("/Users/IIMaximII/Desktop/mlmarerials/doc17.jpg");
+//    vector<Mat> channel(3);
+//    split(input_image, channel);
+//    channel = SharpenImage(channel);
+//    Mat output_image;
+//    merge(channel, output_image);
+    imwrite("/Users/IIMaximII/Desktop/mlmarerials/out19_alt_s.png", output_image);
+    return 0;
 }
